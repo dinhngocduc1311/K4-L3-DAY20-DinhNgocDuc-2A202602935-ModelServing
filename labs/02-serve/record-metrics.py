@@ -5,7 +5,7 @@ This is the continuous-batching evidence (rubric item 9). The gauge that matters
 is `llamacpp:n_busy_slots_per_decode`: the average number of slots doing useful
 work per decode step. At one concurrent request it sits near 1. Under load it
 should climb toward your `--parallel` count -- that climb *is* continuous
-batching, and it is why throughput rises without latency rising as fast.
+batching. Whether that improves goodput still depends on saturation and the SLO.
 
     make serve          # terminal 1
     make load-50        # terminal 2
@@ -89,6 +89,7 @@ def main() -> int:
                 labkit.die(
                     f"Nothing at {args.url} after 3 tries.",
                     "Start the server first: make serve   (it enables --metrics by default)",
+                    r"Windows: .\lab.ps1 serve",
                 )
         time.sleep(args.interval)
 

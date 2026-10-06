@@ -29,20 +29,20 @@ def main() -> int:
     args = ap.parse_args()
 
     hw = labkit.load_hardware()
-    if not labkit.any_gpu(hw):
-        print("No accelerator detected in hardware.json -- nothing to sweep.")
+    devices = labkit.visible_devices()
+    if not devices:
+        print("The llama.cpp runtime enumerates no accelerator -- nothing to sweep.")
         print("On a CPU-only machine the equivalent exercise is: make tune")
         return 1
 
     model = str(labkit.repo_root() / labkit.load_active()["primary_model"])
     threads = labkit.threads(hw)
     grid = [int(x) for x in args.grid.split(",") if x.strip()]
-    active = [k for k, v in hw["gpu"]["backends"].items() if v and k != "cpu_only"]
     is_prefill = args.metric.startswith("pp")
     shape = ["-p", args.metric[2:], "-n", "0"] if is_prefill else ["-p", "0", "-n", "128"]
 
     labkit.banner(f"GPU offload sweep on {pathlib.Path(model).name}")
-    print(f"  backend(s): {', '.join(active)} · threads {threads} · grid {grid}\n")
+    print(f"  device(s): {', '.join(devices)} · threads {threads} · grid {grid}\n")
 
     rows = []
     for ngl in grid:
@@ -66,7 +66,7 @@ def main() -> int:
     speedup = (best["tok_s"] / cpu_only) if cpu_only else 0.0
     md = f"""# Bonus - GPU offload sweep
 
-Host `{labkit.host_tag()}` · backend(s) `{', '.join(active)}` ·
+Host `{labkit.host_tag()}` · runtime device(s) `{', '.join(devices)}` ·
 llama.cpp `{labkit.LLAMA_CPP_BUILD}` · `threads={threads}` · metric `{args.metric}`
 
 {table}

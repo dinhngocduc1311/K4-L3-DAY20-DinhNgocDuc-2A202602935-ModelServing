@@ -1,5 +1,5 @@
 <#
-  Windows runner — the equivalent of `make <target>` for students without make.
+  Windows runner - the equivalent of `make <target>` for students without make.
 
   Works in Windows PowerShell 5.1 (powershell.exe) and PowerShell 7+ (pwsh).
 
@@ -12,7 +12,7 @@
       .\lab.ps1 verify
 
   Every target maps 1:1 to the make target of the same name, so docs/GUIDE.md applies
-  as written — just substitute `.\lab.ps1 x` for `make x`.
+  as written - just substitute `.\lab.ps1 x` for `make x`.
 #>
 param(
     [Parameter(Position = 0)] [string] $Target = "help",
@@ -20,10 +20,27 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$env:PYTHONUTF8 = '1'
 Set-Location $PSScriptRoot
+
+# Local defaults; values already exported in the terminal take precedence.
+if (Test-Path '.env') {
+    foreach ($line in Get-Content '.env') {
+        $line = $line.Trim()
+        if (-not $line -or $line.StartsWith('#')) { continue }
+        $pair = $line -split '=', 2
+        if ($pair.Count -ne 2 -or $pair[0] -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
+            throw "Invalid .env line: $line"
+        }
+        if ($null -eq [Environment]::GetEnvironmentVariable($pair[0], 'Process')) {
+            [Environment]::SetEnvironmentVariable($pair[0], $pair[1], 'Process')
+        }
+    }
+}
 
 $VenvPy = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
 $Port   = if ($env:LAB_SERVER_PORT) { $env:LAB_SERVER_PORT } else { '8080' }
+$LoadDuration = if ($env:LAB_LOAD_DURATION) { $env:LAB_LOAD_DURATION } else { '1m' }
 $SysPy  = 'python'
 
 function Need-Venv {
@@ -45,7 +62,7 @@ function Locust {
 switch ($Target) {
     'help' {
         Write-Host ""
-        Write-Host "Day 20 lab — Windows runner" -ForegroundColor Cyan
+        Write-Host "Day 20 lab - Windows runner" -ForegroundColor Cyan
         Write-Host "Usage:  .\lab.ps1 <target>"
         Write-Host ""
         Write-Host "Setup (00)"
@@ -99,8 +116,8 @@ switch ($Target) {
     'serve'       { Py labs\02-serve\serve.py @Rest }
     'serve-embed' { Py labs\02-serve\serve.py --embedding @Rest }
     'smoke'       { Py labs\02-serve\smoke-test.py }
-    'load-10'     { Locust -f labs\02-serve\load-test.py --headless -u 10 -r 5 -t 1m --host http://localhost:$Port --csv benchmarks\locust-10 --csv-full-history }
-    'load-50'     { Locust -f labs\02-serve\load-test.py --headless -u 50 -r 25 -t 1m --host http://localhost:$Port --csv benchmarks\locust-50 --csv-full-history }
+    'load-10'     { Locust -f labs\02-serve\load-test.py --headless -u 10 -r 5 -t $LoadDuration --host http://localhost:$Port --csv benchmarks\locust-10 --csv-full-history }
+    'load-50'     { Locust -f labs\02-serve\load-test.py --headless -u 50 -r 25 -t $LoadDuration --host http://localhost:$Port --csv benchmarks\locust-50 --csv-full-history }
     'metrics'     { Py labs\02-serve\record-metrics.py --duration 60 --label u50 }
     'load-report' { Py labs\02-serve\load-report.py }
 
@@ -128,11 +145,24 @@ switch ($Target) {
         }
         $build = & $VenvPy -c "import sys;sys.path.insert(0,'lib');import labkit;print(labkit.LLAMA_CPP_BUILD)"
         if (-not (Test-Path 'bonus\llama.cpp')) {
-            git clone --depth 1 --branch $build https://github.com/ggml-org/llama.cpp bonus\llama.cpp
+            git -c core.longpaths=true clone --depth 1 --branch $build https://github.com/ggml-org/llama.cpp bonus\llama.cpp
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         }
         $flags = if ($env:LLAMA_CMAKE_FLAGS) { $env:LLAMA_CMAKE_FLAGS -split ' ' } else { @() }
-        cmake -B bonus\llama.cpp\build -S bonus\llama.cpp @flags -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release
-        cmake --build bonus\llama.cpp\build -j --config Release
+        $generator = if ((Get-Command ninja -ErrorAction SilentlyContinue) -and
+            -not (Test-Path 'bonus\llama.cpp\build\CMakeCache.txt')) { @('-G', 'Ninja') } else { @() }
+        $windowsApi = if ((Get-Command gcc -ErrorAction SilentlyContinue) -and
+            -not (Get-Command cl -ErrorAction SilentlyContinue)) {
+            @('-DCMAKE_C_FLAGS=-D_WIN32_WINNT=0x0A00', '-DCMAKE_CXX_FLAGS=-D_WIN32_WINNT=0x0A00')
+        } else { @() }
+        $jobs = if ($env:LLAMA_BUILD_JOBS) { [int]$env:LLAMA_BUILD_JOBS } else {
+            [Math]::Min([Environment]::ProcessorCount, 4)
+        }
+        if ($jobs -lt 1) { throw 'LLAMA_BUILD_JOBS must be a positive integer.' }
+        cmake -B bonus\llama.cpp\build -S bonus\llama.cpp @generator @flags @windowsApi -DGGML_NATIVE=ON -DCMAKE_BUILD_TYPE=Release
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cmake --build bonus\llama.cpp\build --target llama-bench -j $jobs --config Release
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         Write-Host ""
         Write-Host "Built. Now compare it against the prebuilt binary:  .\lab.ps1 compare-builds"
     }

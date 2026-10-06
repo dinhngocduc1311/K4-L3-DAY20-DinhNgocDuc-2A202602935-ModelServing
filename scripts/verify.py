@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Pre-submission check. Run `make verify` before you push.
 
-Checks what is *committed*, because that is all the grader can see. Large local
-artifacts (the GGUF weights, the runtime binaries) are gitignored by design, so
-their absence is reported as information, never as a failure -- otherwise this
-script could never pass on a fresh clone, which is exactly what the grader does.
+Checks what Git tracks (staged or committed). Staged files are enough for a local
+preflight; the grader sees them only after the final commit and push. Large local
+artifacts (GGUF weights and runtime binaries) are gitignored by design.
 
 Exit 0 means your repo is ready. Exit 1 prints the checklist of what is missing.
 """
@@ -48,8 +47,8 @@ OK, WARN, BAD = "  ✓", "  •", "  ✗"
 def tracked_files() -> set[str] | None:
     """Paths git is tracking, or None if this is not a usable git checkout.
 
-    The grader only ever sees committed files, so "exists on disk" is not the
-    question -- "is it in the repo" is.
+    `git ls-files` includes staged and committed paths. This is intentional: verify
+    can run before the final commit, while the student is still doing bonus work.
     """
     try:
         out = subprocess.run(
@@ -66,12 +65,12 @@ def tracked_files() -> set[str] | None:
 TRACKED = None  # populated in main()
 
 
-def is_committed(path: pathlib.Path) -> bool | None:
+def is_tracked(path: pathlib.Path) -> bool | None:
     """True/False if we know, None if git is unavailable."""
     if TRACKED is None:
         return None
     try:
-        rel = str(path.resolve().relative_to(labkit.repo_root()))
+        rel = path.resolve().relative_to(labkit.repo_root()).as_posix()
     except ValueError:
         return None
     return rel in TRACKED
@@ -105,8 +104,8 @@ def need_file(r: Report, path: pathlib.Path, label: str, how: str) -> pathlib.Pa
     if path.suffix == ".md" and UNANSWERED.search(path.read_text()):
         r.fail(f"{label}: {rel} still has an unanswered 'replace this line' section")
         return None
-    if is_committed(path) is False:
-        r.fail(f"{label}: {rel} exists but is NOT committed — `git add` it or the grader cannot see it")
+    if is_tracked(path) is False:
+        r.fail(f"{label}: {rel} exists but is not tracked — run `git add` first")
         return None
     r.ok(f"{label}: {rel}")
     return path
@@ -122,9 +121,9 @@ def any_file(r: Report, patterns: list[str], label: str, how: str) -> bool:
     if stale and len(stale) == len([p for p in hits if p.suffix == ".md"]):
         r.fail(f"{label}: {stale[0].relative_to(root)} still has an unanswered section")
         return False
-    uncommitted = [p for p in hits if is_committed(p) is False]
-    if uncommitted and len(uncommitted) == len(hits):
-        r.fail(f"{label}: {uncommitted[0].relative_to(root)} is not committed — `git add` it")
+    untracked = [p for p in hits if is_tracked(p) is False]
+    if untracked and len(untracked) == len(hits):
+        r.fail(f"{label}: {untracked[0].relative_to(root)} is not tracked — `git add` it")
         return False
     r.ok(f"{label}: {', '.join(str(p.relative_to(root)) for p in hits[:3])}")
     return True
@@ -167,8 +166,8 @@ def check_manifest(r: Report) -> None:
     if missing:
         r.fail(f"Model manifest: models/active.json lacks {missing} — re-run `make setup`")
         return
-    if is_committed(path) is False:
-        r.fail("Model manifest: models/active.json is not committed — `git add models/active.json`")
+    if is_tracked(path) is False:
+        r.fail("Model manifest: models/active.json is not tracked — `git add models/active.json`")
         return
     r.ok(f"Model manifest: {cfg['model']} ({cfg.get('primary_quant')} + {cfg.get('compare_quant')})")
 
@@ -225,12 +224,12 @@ def check_screenshots(r: Report) -> None:
             f"see submission/screenshots/README.md"
         )
         return
-    uncommitted = [p for p in imgs if is_committed(p) is False]
-    if uncommitted:
-        names = ", ".join(p.name for p in uncommitted[:3])
+    untracked = [p for p in imgs if is_tracked(p) is False]
+    if untracked:
+        names = ", ".join(p.name for p in untracked[:3])
         r.fail(
-            f"Screenshots: {len(uncommitted)} not committed ({names}) — `git add "
-            f"submission/screenshots/` or the grader cannot see them"
+            f"Screenshots: {len(untracked)} not tracked ({names}) — `git add "
+            f"submission/screenshots/` first"
         )
         return
     r.ok(f"Screenshots: {len(imgs)} image(s)")

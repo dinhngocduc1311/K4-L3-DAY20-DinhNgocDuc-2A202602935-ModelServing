@@ -15,7 +15,10 @@ need the variable. See [docs/GUIDE.md](../GUIDE.md) Bước 0.2 for the comparis
 Windows:
 
 ```powershell
-pwsh -ExecutionPolicy Bypass -File labs/00-setup/bootstrap.ps1
+.\lab.ps1 setup
+# hoặc gọi bootstrap trực tiếp từ Windows PowerShell 5.1:
+powershell -ExecutionPolicy Bypass -File labs/00-setup/bootstrap.ps1
+# PowerShell 7 cũng dùng được: pwsh -ExecutionPolicy Bypass -File labs/00-setup/bootstrap.ps1
 ```
 
 ## What each step does
@@ -44,8 +47,9 @@ are gitignored, and `make verify` never asks for them.
 ```
 
 Runtime knobs live in `.env.example` (`LAB_N_THREADS`, `LAB_N_CTX`, `LAB_PARALLEL`, …).
-Copy it to `.env` only if you want to override the auto-detected values — the scripts
-read the environment directly, so `LAB_N_THREADS=6 make bench` works too.
+On Windows, `lab.ps1` automatically loads an optional local `.env`; values already
+exported in the terminal take precedence. On macOS/Linux the Makefile does not source
+`.env`, so export inline instead, for example `LAB_N_THREADS=6 make bench`.
 
 ## If something fails
 

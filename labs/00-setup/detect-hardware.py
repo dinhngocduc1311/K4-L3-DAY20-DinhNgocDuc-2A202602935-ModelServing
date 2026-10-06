@@ -63,6 +63,8 @@ def detect_cpu() -> dict:
         except OSError:
             info["model"] = "unknown"
     elif sys.platform == "win32":
+        import ctypes
+
         rc, out = run(
             ["powershell", "-NoProfile", "-Command",
              "(Get-CimInstance Win32_Processor | Select-Object -First 1 "
@@ -76,6 +78,10 @@ def detect_cpu() -> dict:
                 info["cores_physical"] = int(data.get("NumberOfCores") or 0) or None
             except (ValueError, KeyError):
                 pass
+        is_feature = ctypes.windll.kernel32.IsProcessorFeaturePresent
+        info["avx2"] = bool(is_feature(40))
+        info["avx512"] = bool(is_feature(41))
+        info["neon"] = bool(is_feature(19))
     info.setdefault("model", "unknown")
     if not info.get("cores_physical"):
         info["cores_physical"] = info["cores_logical"]

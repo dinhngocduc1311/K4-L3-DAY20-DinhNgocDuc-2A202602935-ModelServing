@@ -90,9 +90,12 @@ Grader chấm **commit cuối cùng trước deadline**.
 make verify            # Windows: .\lab.ps1 verify
 ```
 
-Lệnh này phải **exit 0**. Nó kiểm tra: đủ file ở mục 3, file đã được commit, không còn
+Lệnh này phải **exit 0**. Nó kiểm tra: đủ file ở mục 3, file đã được Git track, không còn
 section "required -- replace this line", REFLECTION §1–5 không còn placeholder hay ô
 bảng trống, đủ 5 screenshot.
+
+`verify` chấp nhận file đã stage bằng `git add`, nên bạn có thể chạy nó trước commit cuối
+cùng. Grader chỉ thấy file sau khi bạn commit và push.
 
 Sau đó tự kiểm tra thêm những gì `verify` không kiểm được:
 

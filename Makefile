@@ -8,6 +8,7 @@ LOCUST   := $(VENV)/bin/locust
 SYSPY    := python3
 # Override if 8080 is taken (Colab runs its own service there): LAB_SERVER_PORT=8090
 PORT     := $(or $(LAB_SERVER_PORT),8080)
+LOAD_DURATION := $(or $(LAB_LOAD_DURATION),1m)
 
 # Parallel compile jobs for `make build-llama` (bonus B1). A bare `cmake --build -j`
 # means UNLIMITED jobs; with -DGGML_CUDA=ON each nvcc translation unit can take
@@ -85,11 +86,11 @@ smoke: venv-check ## Prove /v1/chat/completions + non-zero /metrics (rubric 6 + 
 	@$(PY) labs/02-serve/smoke-test.py
 
 load-10: venv-check ## Load test: 10 users, 60s (ramps in 2s)
-	@$(LOCUST) -f labs/02-serve/load-test.py --headless -u 10 -r 5 -t 1m \
+	@$(LOCUST) -f labs/02-serve/load-test.py --headless -u 10 -r 5 -t $(LOAD_DURATION) \
 	    --host http://localhost:$(PORT) --csv benchmarks/locust-10 --csv-full-history
 
 load-50: venv-check ## Load test: 50 users, 60s (ramps in 2s)
-	@$(LOCUST) -f labs/02-serve/load-test.py --headless -u 50 -r 25 -t 1m \
+	@$(LOCUST) -f labs/02-serve/load-test.py --headless -u 50 -r 25 -t $(LOAD_DURATION) \
 	    --host http://localhost:$(PORT) --csv benchmarks/locust-50 --csv-full-history
 
 load-report: venv-check ## Turn both load runs into the saturation reading

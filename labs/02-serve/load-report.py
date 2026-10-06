@@ -5,10 +5,10 @@ Reads the CSVs written by `make load-10` and `make load-50` and answers the
 question the deck actually cares about: what happened to latency when you asked
 the same server to do 5x the work?
 
-Effective concurrency comes from Little's Law -- L = lambda * W (arrival rate x
-time in system). Compare it to the server's --parallel slot count: if it exceeds
-the slots, requests are queueing, and the P95 inflation you see is queue time,
-not compute time. That is the whole goodput-vs-throughput argument in one number.
+Effective concurrency is estimated with Little's Law -- L = lambda * W (arrival
+rate x time in system). Locust gives us completion RPS and completed-request
+latency, which is exact only near steady state. A timed run that ends with queued
+requests underestimates L, so corroborate it with the server gauges.
 
     make load-10 && make load-50 && make load-report
 """
@@ -101,8 +101,8 @@ def main() -> int:
         efficiency = (rps_ratio / user_ratio) if user_ratio else 0.0
         slot_util = (conc / slots) if slots else 0.0
 
-        # Two independent signals. Throughput scaling is the reliable one; slot
-        # utilisation corroborates it by naming *what* ran out.
+        # Two independent signals. Throughput scaling is the reliable one; estimated
+        # occupancy corroborates it. True slot utilisation comes from /metrics.
         flat_throughput = efficiency < 0.5
         slots_pegged = slot_util >= 0.85
 
@@ -110,9 +110,9 @@ def main() -> int:
             verdict = "**Saturated.**"
             because = (
                 f"Throughput delivered only {rps_ratio:.2f}x for {user_ratio:.0f}x the offered "
-                f"load, and effective concurrency ({conc:.1f}) is at or above all {slots} decode "
-                f"slots. Saturation sets in somewhere at or below {u2} users; the load you added "
-                f"beyond that point became queue time rather than throughput."
+                f"load, and estimated occupancy ({conc:.1f}) reaches {slot_util * 100:.0f}% of "
+                f"the {slots}-slot capacity (the threshold is 85%). Saturation sets in somewhere "
+                f"at or below {u2} users; corroborate queueing with `requests_deferred`."
             )
         elif flat_throughput:
             verdict = "**Saturated.**"
@@ -137,16 +137,27 @@ def main() -> int:
                 f"where that knee sits."
             )
 
-        goodput = (
-            f"Throughput moved {rps_ratio:.2f}x while P95 moved {p95_ratio:.2f}x. That gap is the "
-            f"goodput argument: past saturation you buy throughput by spending latency, and if "
-            f"your SLO is a P95 target then the requests you added are no longer being served "
-            f"within it. (This lab does not fix an SLO number for you -- pick one in your "
-            f"write-up and state how much goodput you keep at it.)"
-            if p95_ratio > rps_ratio else
-            f"P95 grew no faster than throughput ({p95_ratio:.2f}x vs {rps_ratio:.2f}x), so this "
-            f"server still has headroom at {u2} users."
-        )
+        if p95_ratio > rps_ratio and rps_ratio < 1.0:
+            goodput = (
+                f"Completion throughput **fell to {rps_ratio:.2f}x** while P95 grew "
+                f"{p95_ratio:.2f}x: this is overload making both throughput and latency worse, "
+                f"not buying throughput with latency. Pick an SLO in your write-up. Aggregate "
+                f"percentiles can show whether P95 passes it, but exact goodput requires the "
+                f"count of individual requests within the threshold."
+            )
+        elif p95_ratio > rps_ratio:
+            goodput = (
+                f"Throughput grew {rps_ratio:.2f}x while P95 grew {p95_ratio:.2f}x. Past "
+                f"saturation, extra throughput costs disproportionate latency. Pick an SLO and "
+                f"report the request rate that still meets it; aggregate P95 alone cannot give "
+                f"an exact goodput count."
+            )
+        else:
+            goodput = (
+                f"P95 grew no faster than throughput ({p95_ratio:.2f}x vs {rps_ratio:.2f}x), "
+                f"so the latency curve alone does not show saturation at {u2} users. Check the "
+                f"server gauges before claiming headroom."
+            )
 
         analysis = f"""
 ## What these two runs say
@@ -168,7 +179,8 @@ def main() -> int:
 > shorter run, so these percentiles are indicative rather than solid. Note also that
 > locust averages only *completed* requests: when the run ends with requests still
 > queued, effective concurrency is an **under**-estimate. Trust the throughput-scaling
-> row over the concurrency row here, and run longer (`-t 3m`) if you want firmer numbers.
+> row over the concurrency row here, and set `LAB_LOAD_DURATION=3m` if you want firmer
+> numbers.
 """
 
     md = f"""# 02 - Serve: load test + saturation reading
@@ -179,16 +191,18 @@ Host `{labkit.host_tag()}` · llama.cpp `{labkit.LLAMA_CPP_BUILD}` ·
 
 {table}
 
-*Effective concurrency = RPS x average latency (Little's Law) -- how many requests were
-really in flight, regardless of how many users locust simulated. It counts queued requests
-too, so the occupancy/slot ratio can legitimately exceed 1.0; it is occupancy, not
-utilisation. For true slot utilisation use the server's own gauges (`make metrics`).*
+*Estimated effective concurrency = completion RPS x average completed-request latency.
+Little's Law is exact at steady state; a timed run ending with unfinished requests
+underestimates it. A value above the slot count proves average queueing, but a value below
+it does not rule out tail queueing. For true slot utilisation and queue depth use the
+server gauges from `make metrics`.*
 {analysis}
 ## Your reading (required -- replace this line)
 
 _Where does your server saturate, and what is the evidence? Name the number that
 convinced you. Then say what you would change first to raise goodput at your SLO --
-and why that knob and not another._
+and why that knob and not another. If only aggregate percentiles are available, report
+an SLO pass/fail or bound rather than inventing an exact goodput count._
 """
     out = labkit.write_report("02-server-results.md", md,
                               {"slots": slots, "runs": [{"users": u, **d} for u, d in runs]})

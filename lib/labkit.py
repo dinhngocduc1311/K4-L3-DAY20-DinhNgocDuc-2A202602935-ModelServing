@@ -279,7 +279,8 @@ def gpu_offload_is_live(hw: dict | None = None) -> tuple[bool, str]:
         return False, "no accelerator detected"
     devices = visible_devices()
     if devices:
-        return True, devices[0]
+        ids = ", ".join(d.split(":", 1)[0] for d in devices)
+        return True, f"runtime sees {ids}; the workload selects a device at model load"
     return False, ("an accelerator is installed but this llama.cpp build enumerates "
                    "no devices -- offload would silently run on CPU")
 
@@ -297,6 +298,15 @@ def n_gpu_layers(hw: dict | None = None) -> int:
     if not any_gpu(hw):
         return 0
     return 99 if visible_devices() else 0
+
+
+def gpu_device() -> str | None:
+    """Explicit device keeps multi-GPU runs on the same accelerator."""
+    override = (os.environ.get("LAB_GPU_DEVICE") or "").strip()
+    if override:
+        return override
+    devices = visible_devices()
+    return devices[0].split(":", 1)[0] if devices else None
 
 
 def n_ctx() -> int:
@@ -393,6 +403,9 @@ def server_cmd(
         "-ngl", str(n_gpu_layers()),
         "--ctx-size", str(n_ctx()),
     ]
+    device = gpu_device() if embedding or (os.environ.get("LAB_GPU_DEVICE") or "").strip() else None
+    if device:
+        cmd += ["--device", device]
     if embedding:
         # Embedding regime: pooled single vector per input, no decode loop.
         cmd += ["--embedding", "--pooling", "mean"]

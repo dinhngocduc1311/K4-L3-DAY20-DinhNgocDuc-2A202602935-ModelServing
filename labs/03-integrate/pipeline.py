@@ -71,9 +71,21 @@ def embed(texts: list[str], embed_url: str | None) -> list[list[float]] | None:
         r = httpx.post(f"{embed_url}/v1/embeddings",
                        json={"model": "local", "input": texts}, timeout=120.0)
         r.raise_for_status()
-        return [d["embedding"] for d in r.json()["data"]]
-    except (httpx.HTTPError, KeyError):
-        return None
+        vectors = [d["embedding"] for d in r.json()["data"]]
+        invalid = any(
+            not isinstance(v, list) or not v or
+            any(not isinstance(x, (int, float)) for x in v)
+            for v in vectors
+        )
+        if len(vectors) != len(texts) or invalid or len({len(v) for v in vectors}) != 1:
+            raise ValueError(f"expected {len(texts)} non-empty vectors, got {len(vectors)}")
+        return vectors
+    except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+        labkit.die(
+            f"Embedding endpoint failed: {exc}",
+            "Omit --embed-url to use keyword overlap, or start: make serve-embed",
+            r"Windows: .\lab.ps1 serve-embed",
+        )
 
 
 def retrieve(query: str, k: int = 3,
@@ -127,7 +139,11 @@ def call_llm(messages: list[dict], base: str) -> tuple[str, float, dict]:
                        timeout=300.0)
         r.raise_for_status()
     except httpx.HTTPError as exc:
-        labkit.die(f"{exc}", "Is llama-server running?  Start it with: make serve")
+        labkit.die(
+            f"{exc}",
+            "Is llama-server running?  Start it with: make serve",
+            r"Windows: .\lab.ps1 serve",
+        )
     body = r.json()
     return (body["choices"][0]["message"]["content"],
             (time.perf_counter() - t0) * 1000.0,
@@ -141,7 +157,7 @@ def answer(query: str, base: str, embed_url: str | None, k: int = 3) -> dict:
     return {
         "query": query,
         "answer": text.strip(),
-        "contexts": [{"id": d.id, "score": round(d.score, 4)} for d in docs],
+        "contexts": [{"id": d.id, "score": round(d.score, 4), "text": d.text} for d in docs],
         "embed_backend": backend,
         "timings_ms": {
             **t_retr,
@@ -179,7 +195,9 @@ def main() -> int:
         print(f"\n=== {q}")
         res = answer(q, args.base_url, args.embed_url, k=args.k)
         results.append(res)
-        print(f"  contexts : {[(c['id'], c['score']) for c in res['contexts']]}")
+        print("  contexts :")
+        for c in res["contexts"]:
+            print(f"    [{c['id']}] score={c['score']:.4f} — {c['text']}")
         print(f"  timings  : {res['timings_ms']}")
         st = res["server_timings"]
         if st.get("predicted_n"):
@@ -194,12 +212,29 @@ def main() -> int:
     share = 100 * avg[dominant] / avg["total"] if avg["total"] else 0.0
     print(f"  Dominant stage: {dominant} ({share:.0f}% of total)")
 
+    prompt_ms = [r["server_timings"].get("prompt_ms") for r in results
+                 if isinstance(r["server_timings"].get("prompt_ms"), (int, float))]
+    decode_ms = [r["server_timings"].get("predicted_ms") for r in results
+                 if isinstance(r["server_timings"].get("predicted_ms"), (int, float))]
+    server_mean_ms = {
+        "prefill": round(sum(prompt_ms) / len(prompt_ms), 1) if prompt_ms else None,
+        "decode": round(sum(decode_ms) / len(decode_ms), 1) if decode_ms else None,
+    }
+    if server_mean_ms["prefill"] is not None and server_mean_ms["decode"] is not None:
+        print(f"  Mean server timing (ms): prefill {server_mean_ms['prefill']}, "
+              f"decode {server_mean_ms['decode']}")
+
     backend = results[0]["embed_backend"]
     per_query = labkit.md_table(
         ["Query", "Contexts retrieved", "embed (ms)", "retrieve (ms)", "llm (ms)", "total (ms)"],
         [[f"{r['query'][:44]}...", ", ".join(c["id"] for c in r["contexts"]),
           r["timings_ms"]["embed"], r["timings_ms"]["retrieve"],
           r["timings_ms"]["llm"], r["timings_ms"]["total"]] for r in results],
+    )
+    retrieved = "\n\n".join(
+        f"**{r['query']}**\n\n" + "\n".join(
+            f"- `[{c['id']}]` score={c['score']:.4f}: {c['text']}" for c in r["contexts"]
+        ) for r in results
     )
     md = f"""# 03 - Integrate: RAG pipeline run
 
@@ -208,9 +243,14 @@ retrieval backend: **{backend}** · {len(results)} queries
 
 {per_query}
 
+## Retrieved contexts
+
+{retrieved}
+
 Mean per stage (ms): embed **{avg['embed']}** · retrieve **{avg['retrieve']}** ·
 llm **{avg['llm']}** · total **{avg['total']}**
 Dominant stage: **{dominant}** ({share:.0f}% of total)
+{f"Mean server timing (ms): prefill **{server_mean_ms['prefill']}** · decode **{server_mean_ms['decode']}**" if server_mean_ms['prefill'] is not None and server_mean_ms['decode'] is not None else "Server timing: unavailable"}
 
 ## Answers returned
 
@@ -222,8 +262,11 @@ _List each of N16, N17, N18, N19 as real or stubbed. Stubbing costs no points;
 misrepresenting it does. Then answer: is the dominant stage above what you expected?
 If you had to halve this pipeline's latency, which stage would you attack and why?_
 """
-    out = labkit.write_report("03-integration-results.md", md,
-                              {"backend": backend, "mean_ms": avg, "results": results})
+    out = labkit.write_report(
+        "03-integration-results.md", md,
+        {"backend": backend, "mean_ms": avg, "server_mean_ms": server_mean_ms,
+         "results": results},
+    )
     print(f"\n==> Wrote {out.relative_to(labkit.repo_root())}")
     print("  Put these numbers in REFLECTION.md section 4 as well.")
     return 0

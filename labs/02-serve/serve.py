@@ -16,7 +16,6 @@ which is why the cloud notebook overrides it.
 from __future__ import annotations
 
 import argparse
-import os
 import pathlib
 import subprocess
 import sys
@@ -67,9 +66,9 @@ def main() -> int:
     print(f"\n  {' '.join(cmd)}\n")
 
     try:
-        os.execv(cmd[0], cmd)          # hand the terminal over; Ctrl-C stops the server
-    except OSError:
         return subprocess.run(cmd, check=False).returncode
+    except KeyboardInterrupt:
+        return 130
 
 
 if __name__ == "__main__":

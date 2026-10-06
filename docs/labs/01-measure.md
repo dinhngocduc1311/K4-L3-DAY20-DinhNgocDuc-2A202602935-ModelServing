@@ -17,16 +17,20 @@ quantization. You measure real over-the-wire latency without managing two termin
 Writes **`benchmarks/01-quickstart-results.md`** — rubric items 3, 4 and 5.
 
 ```
-TTFT P50/P95   128 / 190 ms     <- prefill: how long until the first token
-TPOT P50/P95    34 / 41  ms     <- decode: cost of each token after that
-Decode           29 tok/s       <- 1000 / TPOT_p50
-E2E P50/P95/P99  1210 / 1450 / 1620 ms
+TTFT P50/P95/P99  <- client wait until the first token
+TPOT P50/P95/P99  <- decode cost per token after the first
+Decode (tok/s)     <- 1000 / TPOT_p50
+E2E P50/P95/P99   <- complete request latency
 ```
 
 - **TTFT** is dominated by prefill compute. Short prompts hide it; long-context RAG
   does not. Bonus `make sweep-ctx` shows exactly how badly.
-- **TPOT** is dominated by memory bandwidth, not FLOPs. That is why a smaller
-  quantization decodes faster: fewer bytes to move per token.
+- **TPOT** is often dominated by memory bandwidth, not FLOPs. A smaller quantization
+  moves fewer bytes per token, but can still be slower when dequantization compute or
+  backend kernel efficiency dominates.
+
+Percentiles use nearest-rank. With only 10 samples, P95 and P99 both select the
+slowest sample, so report them as required but do not overstate tail precision.
 
 Token counts come from llama.cpp's own `timings` block, so TPOT is not inferred from
 counting SSE chunks.
@@ -35,22 +39,37 @@ counting SSE chunks.
 a warm-up request is discarded, but the OS page cache still matters: the second time
 you run this, the weights are already in RAM. Know which number you are reporting.
 
-## `make tune` — the change that mattered most
+## `make tune` — a measured thread-count before/after
 
-Sweeps thread counts through `llama-bench` (no server, no compiler, no GPU needed) and
-writes **`benchmarks/01-tuning-tg128.md`** with a table, a winner, and a speedup ratio
-against the physical-core default.
+Sweeps thread counts through `llama-bench` (no server or compiler required) and writes
+**`benchmarks/01-tuning-tg128.md`** with a table, a winner, and a speedup ratio against
+the physical-core default. It runs CPU-only when no accelerator is usable and otherwise
+uses the configured `n_gpu_layers`; inspect the report header before interpreting the
+curve.
 
 This is enough for **rubric item 11** on its own. No bonus work required.
 
-The expected shape: throughput climbs to roughly your *physical* core count, then
-flattens or drops. Decode is bandwidth-bound, so threads past that point compete for
-the same memory channels. **If your curve does something else, that is the more
-interesting report** — say what happened and reason about why.
+For a CPU-bound decode, the expected shape is a climb to roughly the *physical* core
+count followed by a plateau or drop. Threads past that point compete for memory
+channels, cache, and scheduling time. With `ngl > 0`, accelerator offload can make the
+CPU-thread curve nearly flat. **If your curve does something else, that is the more
+interesting report** — report it and explain the active backend instead of forcing the
+expected story.
 
 ```bash
-LAB_N_THREADS=<winner> make bench     # re-measure with your best setting
-.venv/bin/python labs/01-measure/tune.py --metric pp512   # tune prefill instead of decode
+# macOS / Linux
+make tune
+LAB_N_THREADS=<winner> make bench
+.venv/bin/python labs/01-measure/tune.py --metric pp512
+```
+
+```powershell
+# Windows
+.\lab.ps1 tune
+$env:LAB_N_THREADS = '<winner>'
+.\lab.ps1 bench
+Remove-Item Env:LAB_N_THREADS
+.\lab.ps1 tune --metric pp512
 ```
 
 ## Knobs
@@ -58,7 +77,7 @@ LAB_N_THREADS=<winner> make bench     # re-measure with your best setting
 | Variable | Default | What it changes |
 |---|---|---|
 | `LAB_N_THREADS` | physical cores | Threads. More is not faster. |
-| `LAB_N_CTX` | 2048 | Context window per slot → KV cache size |
+| `LAB_N_CTX` | 2048 | Total server context, divided across slots → KV cache size |
 | `LAB_N_GPU_LAYERS` | 99 if any accelerator, else 0 | Layers on the GPU |
 | `LAB_MAX_TOKENS` | 64 | Tokens generated per request |
 | `LAB_TEMPERATURE` | 0.7 | Sampling temperature |

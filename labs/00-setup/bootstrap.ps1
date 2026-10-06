@@ -5,6 +5,7 @@
 #
 # Afterwards, use .\lab.ps1 <target> for every step docs/GUIDE.md writes as `make <target>`.
 $ErrorActionPreference = 'Stop'
+$env:PYTHONUTF8 = '1'
 Set-Location (Join-Path $PSScriptRoot '..\..')
 
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {

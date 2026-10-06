@@ -68,7 +68,11 @@ def main() -> int:
         r = httpx.post(f"{base}/v1/chat/completions", json=payload, timeout=300.0)
         r.raise_for_status()
     except httpx.HTTPError as exc:
-        labkit.die(f"{exc}", f"Is llama-server running on :{port}?  Start it with: make serve")
+        labkit.die(
+            f"{exc}",
+            f"Is llama-server running on :{port}?  Start it with: make serve",
+            r"Windows: .\lab.ps1 serve",
+        )
     body = r.json()
     print(f"\n{body['choices'][0]['message']['content'].strip()}\n")
 

@@ -9,6 +9,8 @@ make serve       # terminal 1
 make pipeline    # terminal 2
 ```
 
+Windows uses the same targets: `.\lab.ps1 serve` and `.\lab.ps1 pipeline`.
+
 Runs on toy data as shipped, so you can confirm the seam works before wiring anything
 real.
 
@@ -40,17 +42,22 @@ make serve-embed &                                       # :8081
 .venv/bin/python labs/03-integrate/pipeline.py --embed-url http://localhost:8081
 ```
 
+On Windows, run `.\lab.ps1 serve-embed` in a separate terminal, then
+`.\lab.ps1 pipeline --embed-url http://localhost:8081`. If an explicit embedding URL
+fails, the pipeline stops instead of silently relabeling the run as keyword retrieval.
+
 Without it, retrieval falls back to keyword overlap and reports `embed: 0.0 ms` —
 which is itself a useful baseline for the latency question below.
 
 ## The deliverable
 
 Three example queries running end to end, printing retrieved-context provenance and
-this breakdown:
+the client-side stage breakdown plus server-side prefill/decode:
 
 ```
 timings : {'embed': 41.2, 'retrieve': 0.3, 'llm': 1840.5, 'total': 1882.0}
 Dominant stage: llm (98% of total)
+Mean server timing (ms): prefill 1220.4, decode 510.2
 ```
 
 Put those numbers in **REFLECTION §4** (rubric items 12 and 13).
@@ -68,15 +75,16 @@ writing.
 
 ## Common stumbling points
 
-- **Prompt caching:** keep the system prompt byte-identical across calls. That is what
-  lets the server reuse the cached prefix — watch `prompt_tokens_total` grow more
-  slowly than `tokens_predicted_total` after the first call. Change one character and
-  the reuse disappears.
+- **Prompt caching:** a byte-identical system prompt creates a reusable token prefix,
+  but cumulative `prompt_tokens_total` alone does not prove a cache hit. For a clean
+  A/B, use an otherwise idle one-slot server, repeat the exact prompt, then change one
+  byte and compare server `prompt_ms` plus the LCP/cache log.
 - **Token budgeting:** llama.cpp's tokenizer is not OpenAI's. Do not size retrieved
   context with `tiktoken` and expect it to match; ask the server via `/tokenize`.
 - **Context budget:** default `--ctx-size` is 2048 and it is shared across `--parallel`
-  slots. Too many retrieved chunks and you will truncate. `make sweep-ctx` (bonus)
-  shows what raising it costs in TTFT.
+  slots (about 512 tokens per slot at the default width of four on this runtime).
+  Prompt, template and output all consume that budget. Too many retrieved chunks can
+  truncate; `make sweep-ctx` (bonus) shows what raising it costs in TTFT and memory.
 - **OpenAI SDK:** the shipped code uses `httpx` and needs no extra dependency. If you
   prefer the SDK, `pip install "openai>=1.0"` and point `base_url` at
   `http://localhost:8080/v1`.

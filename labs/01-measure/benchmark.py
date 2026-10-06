@@ -152,8 +152,10 @@ def measure(label: str, model: str, quant: str) -> dict:
         "load_ms": round(load_ms, 1),
         "ttft_p50": round(pct(ttfts, 50), 1),
         "ttft_p95": round(pct(ttfts, 95), 1),
+        "ttft_p99": round(pct(ttfts, 99), 1),
         "tpot_p50": round(tpot_p50, 2),
         "tpot_p95": round(pct(tpots, 95), 2),
+        "tpot_p99": round(pct(tpots, 99), 2),
         "e2e_p50": round(pct(e2es, 50), 1),
         "e2e_p95": round(pct(e2es, 95), 1),
         "e2e_p99": round(pct(e2es, 99), 1),
@@ -175,15 +177,15 @@ def main() -> int:
 
     rows = [
         [r["quant"], f"{r['size_gb']:.2f}", f"{r['load_ms']:.0f}",
-         f"{r['ttft_p50']:.0f} / {r['ttft_p95']:.0f}",
-         f"{r['tpot_p50']:.1f} / {r['tpot_p95']:.1f}",
+         f"{r['ttft_p50']:.0f} / {r['ttft_p95']:.0f} / {r['ttft_p99']:.0f}",
+         f"{r['tpot_p50']:.1f} / {r['tpot_p95']:.1f} / {r['tpot_p99']:.1f}",
          f"{r['e2e_p50']:.0f} / {r['e2e_p95']:.0f} / {r['e2e_p99']:.0f}",
          f"{r['decode_tok_s']:.1f}"]
         for r in (a, b)
     ]
     table = labkit.md_table(
-        ["Quantization", "Size (GB)", "Load (ms)", "TTFT P50/P95 (ms)",
-         "TPOT P50/P95 (ms)", "E2E P50/P95/P99 (ms)", "Decode (tok/s)"],
+        ["Quantization", "Size (GB)", "Load (ms)", "TTFT P50/P95/P99 (ms)",
+         "TPOT P50/P95/P99 (ms)", "E2E P50/P95/P99 (ms)", "Decode (tok/s)"],
         rows,
     )
     # Ratio of decode rates: >1 means the compare quant is faster, <1 means slower.
